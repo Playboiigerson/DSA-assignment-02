@@ -1,0 +1,4 @@
+mongoHost = "mongodb"
+mongoPort = 27017
+dbName = "food_delivery_db"
+kafkaBootstrap = "kafka:9092"
