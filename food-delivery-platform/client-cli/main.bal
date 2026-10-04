@@ -61,7 +61,8 @@ function handleCustomerMenu() {
         io:println("5. Place an Order");
         io:println("6. Track Order Status");
         io:println("7. View Customer Order History");
-        io:println("8. Back to Main Menu");
+        io:println("8. Cancel an Order");
+        io:println("9. Back to Main Menu");
         
         string choice = io:readln("Enter choice: ");
         match choice.trim() {
@@ -101,9 +102,15 @@ function handleCustomerMenu() {
                     http:Response res = check customerClient->post("/", customerPayload);
                     if res.statusCode == http:STATUS_CREATED {
                         json registered = check res.getJsonPayload();
-                        io:println("\nCustomer registered successfully!");
-                        io:println("Assigned Customer ID: ", check registered.id);
-                        io:println(registered);
+                        io:println("\n======================================================================");
+                        io:println(" CUSTOMER REGISTRATION SUCCESSFUL");
+                        io:println("======================================================================");
+                        io:println(" Customer ID : ", check registered.id);
+                        io:println(" Full Name   : ", check registered.name);
+                        io:println(" Email       : ", check registered.email);
+                        io:println(" Address     : ", check registered.address);
+                        io:println(" Balance     : $", check registered.balance);
+                        io:println("======================================================================");
                     } else if res.statusCode == http:STATUS_CONFLICT {
                         io:println("\nError: A customer with this email already exists! Email addresses must be unique.");
                     } else if res.statusCode == http:STATUS_BAD_REQUEST {
@@ -124,8 +131,16 @@ function handleCustomerMenu() {
                 do {
                     http:Response res = check customerClient->get("/" + id);
                     if res.statusCode == http:STATUS_OK {
-                        io:println("\nCustomer Profile:");
-                        io:println(check res.getJsonPayload());
+                        json cJson = check res.getJsonPayload();
+                        io:println("\n======================================================================");
+                        io:println(" CUSTOMER PROFILE DETAILS");
+                        io:println("======================================================================");
+                        io:println(" Customer ID : ", check cJson.id);
+                        io:println(" Full Name   : ", check cJson.name);
+                        io:println(" Email       : ", check cJson.email);
+                        io:println(" Address     : ", check cJson.address);
+                        io:println(" Balance     : $", check cJson.balance);
+                        io:println("======================================================================");
                     } else if res.statusCode == http:STATUS_NOT_FOUND {
                         io:println("Error: Customer ID '" + id + "' not found.");
                     } else {
@@ -247,15 +262,22 @@ function handleCustomerMenu() {
                 do {
                     http:Response res = check orderClient->post("/", payload);
                     if res.statusCode == http:STATUS_CREATED {
-                        json registered = check res.getJsonPayload();
-                        io:println("\nOrder placed successfully!");
-                        io:println("Assigned Order ID    : ", check registered.id);
-                        io:println("Assigned Delivery ID : ", check registered.deliveryId);
-                        io:println(registered);
+                        json ord = check res.getJsonPayload();
+                        io:println("\n======================================================================");
+                        io:println(" ORDER PLACEMENT SUCCESSFUL");
+                        io:println("======================================================================");
+                        io:println(" Order ID       : ", check ord.id);
+                        io:println(" Delivery ID    : ", check ord.deliveryId);
+                        io:println(" Customer ID    : ", check ord.customerId);
+                        io:println(" Restaurant ID : ", check ord.restaurantId);
+                        io:println(" Total Price   : $", check ord.totalPrice);
+                        io:println(" Status        : ", check ord.status);
+                        io:println(" Order Date    : ", check ord.createdAt);
+                        io:println("======================================================================");
                     } else if res.statusCode == http:STATUS_NOT_FOUND {
                         io:println("Error: Specified Customer ID or Restaurant ID was not found.");
                     } else if res.statusCode == http:STATUS_BAD_REQUEST {
-                        io:println("Error: Order request failed. Check menu item ID, stock, or customer balance.");
+                        io:println("Error: Order request failed. Orders can only be placed between 09:00 and 21:00 (UTC+02:00 Windhoek time), or check item ID, stock, or balance.");
                     } else {
                         io:println("Error: Failed to place order. Status: " + res.statusCode.toString());
                     }
@@ -272,8 +294,29 @@ function handleCustomerMenu() {
                 do {
                     http:Response res = check orderClient->get("/" + id);
                     if (res.statusCode == http:STATUS_OK) {
-                        io:println("\nOrder Status Details:");
-                        io:println(check res.getJsonPayload());
+                        json ord = check res.getJsonPayload();
+                        io:println("\n======================================================================");
+                        io:println(" ORDER & DELIVERY TRACKING DETAILS");
+                        io:println("======================================================================");
+                        io:println(" Order ID       : ", check ord.id);
+                        io:println(" Delivery ID    : ", check ord.deliveryId);
+                        io:println(" Customer ID    : ", check ord.customerId);
+                        io:println(" Restaurant ID : ", check ord.restaurantId);
+                        io:println(" Status        : ", check ord.status);
+                        io:println(" Total Price   : $", check ord.totalPrice);
+                        io:println(" Order Date    : ", check ord.createdAt);
+                        io:println(" Last Updated  : ", check ord.updatedAt);
+                        if ord.items is json[] {
+                            io:println(" Items Ordered :");
+                            json[] items = <json[]>check ord.items;
+                            foreach json item in items {
+                                string itemId = check item.itemId;
+                                int qty = check int:fromString((check item.quantity).toString());
+                                decimal price = check decimal:fromString((check item.price).toString());
+                                io:println(string `   * Item ID: ${itemId} | Qty: ${qty} | Unit Price: $${price}`);
+                            }
+                        }
+                        io:println("======================================================================");
                     } else if res.statusCode == http:STATUS_NOT_FOUND {
                         io:println("Error: Order or Delivery ID '" + id + "' not found.");
                     } else {
@@ -333,8 +376,29 @@ function handleCustomerMenu() {
                     io:println("Connection error: Unable to fetch order history (" + err.message() + ")");
                 }
             }
-            "8" => { break; }
-            _ => { io:println("Invalid option. Please enter 1 to 8."); }
+            "8" => {
+                string orderId = io:readln("Enter Order ID or Delivery ID to Cancel: ").trim();
+                if orderId == "" {
+                    io:println("Error: Order ID cannot be empty.");
+                    continue;
+                }
+                do {
+                    http:Response res = check orderClient->post("/" + orderId + "/cancel", ());
+                    if res.statusCode == http:STATUS_OK {
+                        io:println("\nOrder cancelled successfully! Customer balance has been refunded, restaurant stock restored, and driver released.");
+                    } else if res.statusCode == http:STATUS_NOT_FOUND {
+                        io:println("Error: Order ID '" + orderId + "' not found.");
+                    } else if res.statusCode == http:STATUS_BAD_REQUEST {
+                        io:println("Error: Cannot cancel order (order may already be delivered).");
+                    } else {
+                        io:println("Error: Failed to cancel order. Status: " + res.statusCode.toString());
+                    }
+                } on fail error err {
+                    io:println("Connection error: " + err.message());
+                }
+            }
+            "9" => { break; }
+            _ => { io:println("Invalid option. Please enter 1 to 9."); }
         }
     }
 }
@@ -347,7 +411,8 @@ function handleRestaurantMenu() {
         io:println("2. Add Menu Items");
         io:println("3. Restock Menu Items (Update Inventory)");
         io:println("4. View Restaurant Profile");
-        io:println("5. Back to Main Menu");
+        io:println("5. View Restaurant Orders & Update Status");
+        io:println("6. Back to Main Menu");
         
         string choice = io:readln("Enter choice: ");
         match choice.trim() {
@@ -461,8 +526,59 @@ function handleRestaurantMenu() {
                     io:println("Connection error: " + err.message());
                 }
             }
-            "5" => { break; }
-            _ => { io:println("Invalid option."); }
+            "5" => {
+                string restId = io:readln("Enter Restaurant ID: ").trim();
+                if restId == "" {
+                    io:println("Error: Restaurant ID cannot be empty.");
+                    continue;
+                }
+                do {
+                    http:Response res = check restaurantClient->get("/" + restId + "/orders");
+                    if res.statusCode == http:STATUS_OK {
+                        json payload = check res.getJsonPayload();
+                        json[] orders = <json[]>payload;
+                        if orders.length() == 0 {
+                            io:println("No active orders found for Restaurant ID: " + restId);
+                        } else {
+                            io:println("\n======================================================================");
+                            io:println(" RESTAURANT ORDERS (Restaurant ID: " + restId + ")");
+                            io:println("======================================================================");
+                            foreach json ord in orders {
+                                string oId = check ord.id;
+                                string dId = check ord.deliveryId;
+                                string cId = check ord.customerId;
+                                string st = check ord.status;
+                                decimal tp = check decimal:fromString((check ord.totalPrice).toString());
+                                io:println(string ` Order ID       : ${oId}`);
+                                io:println(string ` Delivery ID    : ${dId}`);
+                                io:println(string ` Customer ID    : ${cId}`);
+                                io:println(string ` Status        : ${st}`);
+                                io:println(string ` Total Price   : $${tp}`);
+                                io:println("----------------------------------------------------------------------");
+                            }
+                            string actionChoice = io:readln("Would you like to update an order status? (y/n): ").trim().toLowerAscii();
+                            if actionChoice == "y" {
+                                string orderId = io:readln("Enter Order ID to Update: ").trim();
+                                io:println("Available Status Options: PREPARING, READY, OUT_FOR_DELIVERY");
+                                string newStatus = io:readln("Enter New Status: ").trim().toUpperAscii();
+                                
+                                http:Response updateRes = check restaurantClient->post("/" + restId + "/orders/" + orderId + "/status", { status: newStatus });
+                                if updateRes.statusCode == http:STATUS_OK {
+                                    io:println(string `Order ${orderId} status updated to ${newStatus} successfully!`);
+                                } else {
+                                    io:println("Failed to update status. Status code: " + updateRes.statusCode.toString());
+                                }
+                            }
+                        }
+                    } else {
+                        io:println("Error: Failed to fetch restaurant orders. Status: " + res.statusCode.toString());
+                    }
+                } on fail error err {
+                    io:println("Connection error: " + err.message());
+                }
+            }
+            "6" => { break; }
+            _ => { io:println("Invalid option. Please enter 1 to 6."); }
         }
     }
 }
@@ -554,22 +670,31 @@ function handleDeliveryMenu() {
         io:println("2. Simulate Delivery Completion (Driver marks delivered)");
         io:println("3. List All Drivers");
         io:println("4. List All Active/Pending Deliveries");
-        io:println("5. Back to Main Menu");
+        io:println("5. View Driver Assigned Deliveries & Instructions");
+        io:println("6. Back to Main Menu");
         
         string choice = io:readln("Enter choice: ");
         match choice.trim() {
             "1" => {
                 io:println("\n[ Register Delivery Driver ]");
                 string name = io:readln("Enter Driver Name: ").trim();
+                string password = io:readln("Enter Driver Password: ").trim();
+                string confirmPassword = io:readln("Confirm Driver Password: ").trim();
                 
-                if name == "" {
-                    io:println("Error: Driver Name cannot be empty.");
+                if name == "" || password == "" {
+                    io:println("Error: Driver Name and Password cannot be empty.");
+                    continue;
+                }
+                
+                if password != confirmPassword {
+                    io:println("Error: Passwords do not match! Please try again.");
                     continue;
                 }
                 
                 json driver = {
                     id: "", // Auto-generated by backend
                     name: name,
+                    password: password,
                     status: "AVAILABLE"
                 };
                 
@@ -577,9 +702,13 @@ function handleDeliveryMenu() {
                     http:Response res = check deliveryClient->post("/drivers", driver);
                     if res.statusCode == http:STATUS_CREATED {
                         json registered = check res.getJsonPayload();
-                        io:println("\nDriver registered successfully!");
-                        io:println("Assigned Driver ID: ", check registered.id);
-                        io:println(registered);
+                        io:println("\n======================================================================");
+                        io:println(" DRIVER REGISTRATION SUCCESSFUL");
+                        io:println("======================================================================");
+                        io:println(" Driver ID   : ", check registered.id);
+                        io:println(" Driver Name : ", check registered.name);
+                        io:println(" Status      : ", check registered.status);
+                        io:println("======================================================================");
                     } else {
                         io:println("Failed to register driver. Status: " + res.statusCode.toString());
                     }
@@ -589,10 +718,22 @@ function handleDeliveryMenu() {
             }
             "2" => {
                 string deliveryId = io:readln("Enter Delivery ID (e.g. del_12345678): ").trim();
+                string password = io:readln("Enter Driver Password: ").trim();
+
+                if deliveryId == "" || password == "" {
+                    io:println("Error: Delivery ID and Password are required.");
+                    continue;
+                }
+
                 do {
-                    http:Response res = check deliveryClient->post("/" + deliveryId + "/complete", ());
+                    http:Response res = check deliveryClient->post("/" + deliveryId + "/complete", { password: password });
                     if res.statusCode == http:STATUS_OK {
-                        io:println("Delivery completed successfully! Driver is available again.");
+                        io:println("\n======================================================================");
+                        io:println(" DELIVERY COMPLETED SUCCESSFULLY!");
+                        io:println(" Driver is now available for new orders.");
+                        io:println("======================================================================");
+                    } else if res.statusCode == http:STATUS_UNAUTHORIZED {
+                        io:println("Error: Incorrect driver password provided!");
                     } else if res.statusCode == http:STATUS_NOT_FOUND {
                         io:println("Error: Delivery ID '" + deliveryId + "' not found.");
                     } else {
@@ -606,8 +747,25 @@ function handleDeliveryMenu() {
                 do {
                     http:Response res = check deliveryClient->get("/drivers");
                     if res.statusCode == http:STATUS_OK {
-                        io:println("\nDrivers List:");
-                        io:println(check res.getJsonPayload());
+                        json payload = check res.getJsonPayload();
+                        json[] drivers = <json[]>payload;
+                        if drivers.length() == 0 {
+                            io:println("\nNo registered delivery drivers found.");
+                        } else {
+                            io:println("\n======================================================================");
+                            io:println(" REGISTERED DELIVERY DRIVERS");
+                            io:println("======================================================================");
+                            foreach json drv in drivers {
+                                string drvId = check drv.id;
+                                string drvName = check drv.name;
+                                string status = check drv.status;
+                                io:println(string ` Driver ID   : ${drvId}`);
+                                io:println(string ` Driver Name : ${drvName}`);
+                                io:println(string ` Status      : ${status}`);
+                                io:println("----------------------------------------------------------------------");
+                            }
+                            io:println("======================================================================");
+                        }
                     } else {
                         io:println("Failed to fetch drivers.");
                     }
@@ -619,8 +777,32 @@ function handleDeliveryMenu() {
                 do {
                     http:Response res = check deliveryClient->get("/");
                     if res.statusCode == http:STATUS_OK {
-                        io:println("\nDeliveries List:");
-                        io:println(check res.getJsonPayload());
+                        json payload = check res.getJsonPayload();
+                        json[] deliveries = <json[]>payload;
+                        if deliveries.length() == 0 {
+                            io:println("\nNo active or pending deliveries found.");
+                        } else {
+                            io:println("\n======================================================================");
+                            io:println(" ALL ACTIVE / PENDING DELIVERIES");
+                            io:println("======================================================================");
+                            foreach json del in deliveries {
+                                string delId = check del.id;
+                                string orderId = check del.orderId;
+                                string driverId = check del.driverId;
+                                string status = check del.status;
+                                string assignedAt = check del.assignedAt;
+                                string completedAt = check del.completedAt;
+                                
+                                io:println(string ` Delivery ID : ${delId}`);
+                                io:println(string ` Order ID    : ${orderId}`);
+                                io:println(string ` Driver ID   : ${driverId == "" ? "(Unassigned)" : driverId}`);
+                                io:println(string ` Status      : ${status}`);
+                                io:println(string ` Assigned At : ${assignedAt == "" ? "N/A" : assignedAt}`);
+                                io:println(string ` Completed At: ${completedAt == "" ? "N/A" : completedAt}`);
+                                io:println("----------------------------------------------------------------------");
+                            }
+                            io:println("======================================================================");
+                        }
                     } else {
                         io:println("Failed to fetch deliveries.");
                     }
@@ -628,8 +810,49 @@ function handleDeliveryMenu() {
                     io:println("Connection error: " + err.message());
                 }
             }
-            "5" => { break; }
-            _ => { io:println("Invalid option."); }
+            "5" => {
+                string driverId = io:readln("Enter Driver ID: ").trim();
+                string password = io:readln("Enter Driver Password: ").trim();
+                if driverId == "" || password == "" {
+                    io:println("Error: Driver ID and Password are required.");
+                    continue;
+                }
+                do {
+                    http:Response res = check deliveryClient->get(string `/driver/${driverId}?password=${password}`);
+                    if res.statusCode == http:STATUS_OK {
+                        json payload = check res.getJsonPayload();
+                        json[] list = <json[]>payload;
+                        if list.length() == 0 {
+                            io:println("\nNo active deliveries assigned to Driver ID: " + driverId);
+                        } else {
+                            io:println("\n======================================================================");
+                            io:println(" ASSIGNED DELIVERIES & INSTRUCTIONS FOR DRIVER: " + driverId);
+                            io:println("======================================================================");
+                            foreach json del in list {
+                                string dId = check del.id;
+                                string oId = check del.orderId;
+                                string st = check del.status;
+                                string aAt = check del.assignedAt;
+                                io:println(string ` Delivery ID : ${dId}`);
+                                io:println(string ` Order ID    : ${oId}`);
+                                io:println(string ` Status      : ${st}`);
+                                io:println(string ` Assigned At : ${aAt}`);
+                                io:println(" Instructions: Pick up order from restaurant and deliver to customer address.");
+                                io:println("----------------------------------------------------------------------");
+                            }
+                            io:println("======================================================================");
+                        }
+                    } else if res.statusCode == http:STATUS_UNAUTHORIZED {
+                        io:println("Error: Incorrect password provided for Driver ID '" + driverId + "'!");
+                    } else {
+                        io:println("Error: Failed to fetch driver deliveries. Status: " + res.statusCode.toString());
+                    }
+                } on fail error err {
+                    io:println("Connection error: " + err.message());
+                }
+            }
+            "6" => { break; }
+            _ => { io:println("Invalid option. Please enter 1 to 6."); }
         }
     }
 }
