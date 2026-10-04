@@ -4,3 +4,5 @@ dbName = "food_delivery_db"
 kafkaBootstrap = "kafka:9092"
 customerServiceUrl = "http://customer-service:9001/customers"
 restaurantServiceUrl = "http://restaurant-service:9002/restaurants"
+deliveryServiceUrl = "http://delivery-service:9005/deliveries"
+

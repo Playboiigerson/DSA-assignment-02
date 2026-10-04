@@ -13,6 +13,7 @@ configurable string kafkaBootstrap = "localhost:9092";
 public type Driver record {|
     string id;
     string name;
+    string password = "";
     string status; // AVAILABLE, BUSY
 |};
 
@@ -82,7 +83,7 @@ service /deliveries on new http:Listener(9005) {
         do {
             string drvId = newDriver.id.trim();
             if drvId == "" {
-                drvId = "driver_" + (check random:createDecimal()).toString().substring(2, 10);
+                drvId = "driver_" + random:createDecimal().toString().substring(2, 10);
             } else {
                 Driver? existing = check getDriver(drvId);
                 if existing is Driver {
@@ -93,6 +94,7 @@ service /deliveries on new http:Listener(9005) {
             Driver toSave = {
                 id: drvId,
                 name: newDriver.name,
+                password: newDriver.password,
                 status: newDriver.status == "" ? "AVAILABLE" : newDriver.status
             };
 
@@ -172,14 +174,14 @@ service /deliveries on new http:Listener(9005) {
     }
 
     // POST /deliveries/[id]/complete - Complete a delivery
-    resource function post [string id]/complete() returns http:Ok|http:NotFound|http:BadRequest|http:InternalServerError {
+    resource function post [string id]/complete(record {| string password = ""; |} payload) returns http:Ok|http:NotFound|http:BadRequest|http:Unauthorized|http:InternalServerError {
         log:printInfo("Completing delivery: " + id);
         do {
             Delivery? del = check getDelivery(id);
             if del is () {
                 // If not found in deliveryCollection yet, create a record on the fly so completion succeeds!
                 string orderId = id.startsWith("order_") ? id : "";
-                string delId = id.startsWith("del_") ? id : ("del_" + check random:createDecimal().toString().substring(2, 10));
+                string delId = id.startsWith("del_") ? id : ("del_" + random:createDecimal().toString().substring(2, 10));
                 string timeNow = time:utcToString(time:utcNow());
                 
                 Delivery onTheFlyDelivery = {
@@ -208,6 +210,17 @@ service /deliveries on new http:Listener(9005) {
             }
             if del.status == "COMPLETED" {
                 return http:BAD_REQUEST;
+            }
+
+            // Verify password if assigned to a driver
+            if del.driverId != "" {
+                Driver? drv = check getDriver(del.driverId);
+                if drv is Driver && drv.password != "" {
+                    if payload.password != drv.password {
+                        log:printWarn(string `Incorrect password provided for driver ${del.driverId} on delivery completion`);
+                        return http:UNAUTHORIZED;
+                    }
+                }
             }
             
             string timeNow = time:utcToString(time:utcNow());
@@ -260,6 +273,57 @@ service /deliveries on new http:Listener(9005) {
             return http:OK;
         } on fail error err {
             log:printError("Error completing delivery: " + err.message());
+            return http:INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    // POST /deliveries/cancel-delivery - Release driver and mark delivery CANCELLED on order cancellation
+    resource function post cancel\-delivery(record {| string orderId; string deliveryId; |} payload) returns http:Ok|http:InternalServerError {
+        log:printInfo(string `Cancelling delivery for order ${payload.orderId}, deliveryId ${payload.deliveryId}`);
+        do {
+            Delivery? del = check getDelivery(payload.deliveryId);
+            if del is () {
+                del = check getDelivery(payload.orderId);
+            }
+            if del is Delivery {
+                _ = check deliveryCollection->updateOne({ "id": del.id }, { set: { "status": "CANCELLED" } });
+                if del.driverId != "" {
+                    _ = check driverCollection->updateOne({ "id": del.driverId }, { set: { "status": "AVAILABLE" } });
+                    log:printInfo(string `Released driver ${del.driverId} back to AVAILABLE`);
+                    _ = start assignPendingDeliveriesToDriver(del.driverId);
+                }
+            }
+            return http:OK;
+        } on fail error err {
+            log:printError("Error processing cancel-delivery: " + err.message());
+            return http:INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    // GET /deliveries/driver/[driverId] - Get assigned deliveries for a driver
+    resource function get driver/[string driverId](string password = "") returns Delivery[]|http:Unauthorized|http:InternalServerError {
+        do {
+            Driver? drv = check getDriver(driverId);
+            if drv is Driver && drv.password != "" {
+                if password != drv.password {
+                    log:printWarn(string `Incorrect password provided for driver ${driverId} on viewing deliveries`);
+                    return http:UNAUTHORIZED;
+                }
+            }
+
+            stream<record {}, error?> resultStream = check deliveryCollection->find({ "driverId": driverId });
+            Delivery[] list = [];
+            check resultStream.forEach(function(record {} doc) {
+                do {
+                    Delivery del = check doc.cloneWithType(Delivery);
+                    list.push(del);
+                } on fail error e {
+                    log:printError("Error parsing driver delivery: " + e.message());
+                }
+            });
+            return list;
+        } on fail error err {
+            log:printError("Error fetching driver deliveries: " + err.message());
             return http:INTERNAL_SERVER_ERROR;
         }
     }

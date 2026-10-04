@@ -12,6 +12,7 @@ configurable string kafkaBootstrap = "localhost:9092";
 
 configurable string customerServiceUrl = "http://localhost:9001/customers";
 configurable string restaurantServiceUrl = "http://localhost:9002/restaurants";
+configurable string deliveryServiceUrl = "http://localhost:9005/deliveries";
 
 public type OrderItem record {|
     string itemId;
@@ -103,6 +104,7 @@ final kafka:Producer kafkaProducer;
 
 final http:Client customerClient;
 final http:Client restaurantClient;
+final http:Client deliveryClient;
 
 function init() returns error? {
     mongoClient = check new ({
@@ -122,8 +124,9 @@ function init() returns error? {
 
     customerClient = check new (customerServiceUrl);
     restaurantClient = check new (restaurantServiceUrl);
+    deliveryClient = check new (deliveryServiceUrl);
 
-    log:printInfo("Order Service initialized. Connects to " + customerServiceUrl + " and " + restaurantServiceUrl);
+    log:printInfo("Order Service initialized. Connects to " + customerServiceUrl + ", " + restaurantServiceUrl + " and " + deliveryServiceUrl);
 }
 
 service /orders on new http:Listener(9003) {
@@ -132,6 +135,14 @@ service /orders on new http:Listener(9003) {
     resource function post .(OrderPayload payload) returns Order|http:BadRequest|http:NotFound|http:InternalServerError {
         log:printInfo(string `Received order request for customer ${payload.customerId} at restaurant ${payload.restaurantId}`);
         do {
+            // 0. Validate ordering hours: 09:00 to 21:00 (UTC+02:00 Windhoek time)
+            time:Civil civilNow = time:utcToCivil(time:utcNow());
+            int windhoekHour = (civilNow.hour + 2) % 24;
+            if windhoekHour < 9 || windhoekHour >= 21 {
+                log:printWarn(string `Order placement rejected outside operating hours (09:00 - 21:00 UTC+02:00 Windhoek). Current local hour: ${windhoekHour}`);
+                return http:BAD_REQUEST;
+            }
+
             // 1. Validate customer exists & has balance
             http:Response custRes = check customerClient->get("/" + payload.customerId);
             if custRes.statusCode == http:STATUS_NOT_FOUND {
@@ -202,8 +213,8 @@ service /orders on new http:Listener(9003) {
             }
 
             // 5. Create Order with Auto-generated Order ID and Delivery ID
-            string orderId = "order_" + (check random:createDecimal()).toString().substring(2, 10);
-            string deliveryId = "del_" + (check random:createDecimal()).toString().substring(2, 10);
+            string orderId = "order_" + random:createDecimal().toString().substring(2, 10);
+            string deliveryId = "del_" + random:createDecimal().toString().substring(2, 10);
             string timeNow = time:utcToString(time:utcNow());
             Order newOrder = {
                 id: orderId,
@@ -274,6 +285,101 @@ service /orders on new http:Listener(9003) {
             return customerOrders;
         } on fail error err {
             log:printError("Error fetching customer orders: " + err.message());
+            return http:INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    // GET /orders/restaurant/[restaurantId] - Get orders for a restaurant
+    resource function get restaurant/[string restaurantId]() returns Order[]|http:InternalServerError {
+        log:printInfo("Fetching orders for restaurant: " + restaurantId);
+        do {
+            stream<record {}, error?> resultStream = check orderCollection->find({ "restaurantId": restaurantId });
+            record {| record {} value; |}? result = check resultStream.next();
+            Order[] restOrders = [];
+            while result is record {| record {} value; |} {
+                Order ord = check result.value.cloneWithType(Order);
+                restOrders.push(ord);
+                result = check resultStream.next();
+            }
+            check resultStream.close();
+            return restOrders;
+        } on fail error err {
+            log:printError("Error fetching restaurant orders: " + err.message());
+            return http:INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    // POST /orders/[id]/status - Update order status (PREPARING, READY, OUT_FOR_DELIVERY)
+    resource function post [string id]/status(record {| string status; |} payload) returns http:Ok|http:NotFound|http:BadRequest|http:InternalServerError {
+        log:printInfo(string `Updating status for order/delivery ${id} to ${payload.status}`);
+        do {
+            Order? ord = check getOrder(id);
+            if ord is () {
+                return http:NOT_FOUND;
+            }
+            string newStatus = payload.status.toUpperAscii().trim();
+            check updateOrderStatus(ord.id, newStatus);
+
+            // Publish status-specific events
+            if newStatus == "PREPARING" {
+                json prepJson = { orderId: ord.id, restaurantId: ord.restaurantId, estimatedTime: "15 minutes" };
+                check kafkaProducer->send({ topic: "orders.preparing", value: prepJson.toString().toBytes() });
+            } else if newStatus == "READY" || newStatus == "OUT_FOR_DELIVERY" {
+                json readyJson = { orderId: ord.id, restaurantId: ord.restaurantId, deliveryId: ord.deliveryId };
+                check kafkaProducer->send({ topic: "orders.ready", value: readyJson.toString().toBytes() });
+            }
+
+            return http:OK;
+        } on fail error err {
+            log:printError("Error updating order status: " + err.message());
+            return http:INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    // POST /orders/[id]/cancel - Universal order cancellation at any stage
+    resource function post [string id]/cancel() returns http:Ok|http:NotFound|http:BadRequest|http:InternalServerError {
+        log:printInfo("Request to cancel order: " + id);
+        do {
+            Order? ord = check getOrder(id);
+            if ord is () {
+                return http:NOT_FOUND;
+            }
+            if ord.status == "CANCELLED" {
+                log:printWarn("Order is already cancelled: " + ord.id);
+                return http:OK;
+            }
+            if ord.status == "DELIVERED" {
+                log:printWarn("Cannot cancel a delivered order: " + ord.id);
+                return http:BAD_REQUEST;
+            }
+
+            // 1. Mark status as CANCELLED in DB
+            check updateOrderStatus(ord.id, "CANCELLED");
+
+            // 2. Refund customer balance
+            json refundPayload = { amount: ord.totalPrice };
+            http:Response _ = check customerClient->post("/" + ord.customerId + "/add-balance", refundPayload);
+            log:printInfo(string `Refunded $${ord.totalPrice} to customer ${ord.customerId}`);
+
+            // 3. Restock restaurant inventory
+            record {| string itemId; int quantity; |}[] restockItems = [];
+            foreach var item in ord.items {
+                restockItems.push({ itemId: item.itemId, quantity: item.quantity });
+            }
+            http:Response _ = check restaurantClient->post("/" + ord.restaurantId + "/restock-items", { items: restockItems });
+            log:printInfo(string `Restocked items for restaurant ${ord.restaurantId}`);
+
+            // 4. Release driver in delivery service if assigned
+            http:Response _ = check deliveryClient->post("/cancel-delivery", { orderId: ord.id, deliveryId: ord.deliveryId });
+
+            // 5. Publish orders.cancelled event
+            json cancelJson = { orderId: ord.id, customerId: ord.customerId, restaurantId: ord.restaurantId, deliveryId: ord.deliveryId, amount: ord.totalPrice };
+            check kafkaProducer->send({ topic: "orders.cancelled", value: cancelJson.toString().toBytes() });
+            log:printInfo("Published orders.cancelled event for order: " + ord.id);
+
+            return http:OK;
+        } on fail error err {
+            log:printError("Error cancelling order: " + err.message());
             return http:INTERNAL_SERVER_ERROR;
         }
     }

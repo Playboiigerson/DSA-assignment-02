@@ -17,7 +17,8 @@ listener kafka:Listener notificationListener = new (kafkaBootstrap, {
         "orders.preparing", 
         "orders.ready", 
         "delivery.assigned", 
-        "delivery.completed"
+        "delivery.completed",
+        "orders.cancelled"
     ]
 });
 
@@ -53,11 +54,18 @@ service on notificationListener {
                 "delivery.assigned" => {
                     string orderId = check payloadJson.orderId.ensureType(string);
                     string driverName = check payloadJson.driverName.ensureType(string);
+                    string driverId = payloadJson.driverId is string ? check payloadJson.driverId.ensureType(string) : "";
+                    string deliveryId = payloadJson.deliveryId is string ? check payloadJson.deliveryId.ensureType(string) : "";
+                    log:printInfo(string `[DRIVER NOTIFICATION] Driver ${driverName} (${driverId}) assigned to delivery ${deliveryId} for Order ${orderId}. Instructions: Pick up order from restaurant and deliver to customer.`);
                     log:printInfo(string `[SMS/PUSH] To Customer: Order ${orderId} is out for delivery. Driver ${driverName} is on the way!`);
                 }
                 "delivery.completed" => {
                     string orderId = check payloadJson.orderId.ensureType(string);
                     log:printInfo(string `[SMS/PUSH] To Customer: Your order ${orderId} has been successfully delivered. Enjoy your meal!`);
+                }
+                "orders.cancelled" => {
+                    string orderId = check payloadJson.orderId.ensureType(string);
+                    log:printInfo(string `[SMS/PUSH] To Customer: Order ${orderId} has been cancelled and refund processed.`);
                 }
                 _ => {
                     log:printInfo(string `Notification Service received event on topic ${topic}: ${payloadStr}`);
