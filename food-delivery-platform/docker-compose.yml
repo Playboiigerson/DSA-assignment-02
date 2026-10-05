@@ -36,6 +36,7 @@ services:
       context: ./customer-service
       dockerfile: Dockerfile
     container_name: customer-service
+    restart: on-failure
     ports:
       - "9001:9001"
     depends_on:
@@ -46,6 +47,7 @@ services:
       context: ./restaurant-service
       dockerfile: Dockerfile
     container_name: restaurant-service
+    restart: on-failure
     ports:
       - "9002:9002"
     depends_on:
@@ -57,6 +59,7 @@ services:
       context: ./order-service
       dockerfile: Dockerfile
     container_name: order-service
+    restart: on-failure
     ports:
       - "9003:9003"
     depends_on:
@@ -70,6 +73,7 @@ services:
       context: ./payment-service
       dockerfile: Dockerfile
     container_name: payment-service
+    restart: on-failure
     depends_on:
       - mongodb
       - kafka
@@ -80,6 +84,7 @@ services:
       context: ./delivery-service
       dockerfile: Dockerfile
     container_name: delivery-service
+    restart: on-failure
     ports:
       - "9005:9005"
     depends_on:
@@ -91,6 +96,7 @@ services:
       context: ./notification-service
       dockerfile: Dockerfile
     container_name: notification-service
+    restart: on-failure
     depends_on:
       - kafka
 
@@ -99,11 +105,29 @@ services:
       context: ./admin-service
       dockerfile: Dockerfile
     container_name: admin-service
+    restart: on-failure
     ports:
       - "9006:9006"
     depends_on:
       - mongodb
       - kafka
+
+  web-ui:
+    build:
+      context: ./web-ui
+      dockerfile: Dockerfile
+    container_name: web-ui
+    ports:
+      - "8080:80"
+    depends_on:
+      - customer-service
+      - restaurant-service
+      - order-service
+      - payment-service
+      - delivery-service
+      - notification-service
+      - admin-service
+    restart: unless-stopped
 
 volumes:
   mongo_data:

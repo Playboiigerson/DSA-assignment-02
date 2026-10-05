@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Food Delivery Platform</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🍽</span>
+      <div>
+        <h1>Food Delivery Platform</h1>
+        <p class="sub">Distributed · Ballerina · Kafka · MongoDB</p>
+      </div>
+    </div>
+    <div class="clock">
+      <span id="windhoekClock">--:--</span>
+      <span class="clock-label">Windhoek (UTC+02:00)</span>
+      <span id="hoursBadge" class="badge">…</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="customers">Customers</button>
+    <button class="tab" data-tab="restaurants">Restaurants</button>
+    <button class="tab" data-tab="delivery">Delivery &amp; Drivers</button>
+    <button class="tab" data-tab="admin">Admin Reports</button>
+    <span class="live" id="liveIndicator" title="Auto-refreshing every few seconds"><span class="dot"></span>Live</span>
+  </nav>
+
+  <main>
+    <!-- ============================ DASHBOARD ============================ -->
+    <section id="tab-dashboard" class="panel active">
+      <h2 class="section-title">Service health</h2>
+      <div id="healthGrid" class="health-grid"></div>
+
+      <div id="kpis" class="kpis"></div>
+
+      <div class="grid-2-1">
+        <div class="card">
+          <div class="card-head">
+            <h3>Order pipeline</h3>
+            <span class="muted small">Live view of every order across all restaurants</span>
+          </div>
+          <div id="pipeline" class="pipeline"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Event feed</h3>
+            <span class="muted small">Lifecycle changes observed in real time</span>
+          </div>
+          <ul id="feed" class="feed"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ CUSTOMERS ============================ -->
+    <section id="tab-customers" class="panel">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Active customer</h3>
+          <form id="loadCustomerForm" class="row">
+            <input name="id" placeholder="Customer ID (e.g. cust_01)" required>
+            <button type="submit">Load</button>
+          </form>
+          <div id="customerProfile" class="profile empty">No customer loaded. Register one or enter an ID.</div>
+          <form id="depositForm" class="row hidden">
+            <input name="amount" type="number" step="0.01" min="0.01" placeholder="Deposit amount" required>
+            <button type="submit">Add balance</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3>Register new customer</h3>
+          <form id="registerCustomerForm" class="stack">
+            <label>Full name <input name="name" required></label>
+            <label>Email <input name="email" type="email" required></label>
+            <label>Delivery address <input name="address" required></label>
+            <label>Starting balance <input name="balance" type="number" step="0.01" min="0" value="0" required></label>
+            <button type="submit">Register</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="grid-2-1">
+        <div class="card">
+          <div class="card-head">
+            <h3>Browse restaurants &amp; menus</h3>
+            <span class="muted small">Location, food name, menu ID &amp; quantity available</span>
+          </div>
+          <div id="browseRestaurants" class="restaurant-list"></div>
+        </div>
+        <div class="card sticky">
+          <h3>Your order</h3>
+          <div id="cart"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>Order history</h3>
+          <span class="muted small">Updates live as the order moves through payment, kitchen and delivery</span>
+        </div>
+        <div id="customerOrders" class="empty">Load a customer to see their orders.</div>
+      </div>
+
+      <div class="card">
+        <h3>Track any order</h3>
+        <form id="trackForm" class="row">
+          <input name="id" placeholder="Order ID or Delivery ID" required>
+          <button type="submit">Track</button>
+        </form>
+        <div id="trackResult"></div>
+      </div>
+    </section>
+
+    <!-- ============================ RESTAURANTS ============================ -->
+    <section id="tab-restaurants" class="panel">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Register new restaurant</h3>
+          <form id="registerRestaurantForm" class="stack">
+            <label>Name <input name="name" required></label>
+            <label>Address <input name="address" required></label>
+            <label class="check"><input name="isOpen" type="checkbox" checked> Open for orders</label>
+            <button type="submit">Register</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Manage restaurant</h3>
+          <label>Restaurant
+            <select id="restaurantSelect"><option value="">— select —</option></select>
+          </label>
+          <div id="restaurantProfile" class="profile empty">Select a restaurant to manage its menu, stock and orders.</div>
+        </div>
+      </div>
+
+      <div id="restaurantManage" class="hidden">
+        <div class="grid-2">
+          <div class="card">
+            <h3>Add menu item</h3>
+            <form id="addMenuForm" class="stack">
+              <label>Menu item ID <input name="id" placeholder="e.g. pizza_01" required></label>
+              <label>Name <input name="name" required></label>
+              <label>Price <input name="price" type="number" step="0.01" min="0.01" required></label>
+              <button type="submit">Add item</button>
+            </form>
+          </div>
+          <div class="card">
+            <h3>Restock menu item</h3>
+            <form id="restockForm" class="stack">
+              <label>Menu item <select name="itemId" id="restockItem" required></select></label>
+              <label>Quantity to add <input name="qty" type="number" step="1" min="1" required></label>
+              <button type="submit">Update inventory</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Restaurant orders</h3>
+            <span class="muted small">Update status: PREPARING, READY, OUT_FOR_DELIVERY</span>
+          </div>
+          <div id="restaurantOrders"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ DELIVERY ============================ -->
+    <section id="tab-delivery" class="panel">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Register delivery driver</h3>
+          <form id="registerDriverForm" class="stack">
+            <label>Driver name <input name="name" required></label>
+            <label>Password <input name="password" type="password" required></label>
+            <label>Confirm password <input name="confirm" type="password" required></label>
+            <button type="submit">Register driver</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Driver portal</h3>
+          <form id="driverLoginForm" class="stack">
+            <label>Driver ID <input name="id" required></label>
+            <label>Password <input name="password" type="password" required></label>
+            <div class="row">
+              <button type="submit">View my deliveries</button>
+              <button type="button" class="ghost hidden" id="driverLogout">Sign out</button>
+            </div>
+          </form>
+          <div id="driverDeliveries"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Complete a delivery by ID</h3>
+        <form id="completeForm" class="row">
+          <input name="id" placeholder="Delivery ID (e.g. del_12345678)" required>
+          <input name="password" type="password" placeholder="Driver password" required>
+          <button type="submit">Mark delivered</button>
+        </form>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>Drivers</h3>
+          <div id="driversTable"></div>
+        </div>
+        <div class="card">
+          <h3>Deliveries</h3>
+          <div id="deliveriesTable"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ ADMIN ============================ -->
+    <section id="tab-admin" class="panel">
+      <div id="deliveryStats" class="kpis"></div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Restaurant performance</h3>
+          <span class="muted small">Compiled by the Admin Service from Kafka events</span>
+        </div>
+        <div id="restaurantReports"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -350,7 +350,7 @@ service on readyListener {
 }
 
 function processReadyOrder(OrderReadyEvent event) returns error? {
-    string deliveryId = event.deliveryId != "" ? event.deliveryId : ("del_" + check random:createDecimal().toString().substring(2, 10));
+    string deliveryId = event.deliveryId != "" ? event.deliveryId : ("del_" + random:createDecimal().toString().substring(2, 10));
     
     Delivery newDelivery = {
         id: deliveryId,

@@ -210,7 +210,7 @@ function handleCustomerMenu() {
                                         
                                         int stock = 0;
                                         if inventoryMap is map<json> && inventoryMap.hasKey(menuId) {
-                                            stock = check int:fromString((check inventoryMap.get(menuId)).toString());
+                                            stock = check int:fromString(inventoryMap.get(menuId).toString());
                                         }
                                         
                                         io:println(string `   * Food Name          : ${foodName}`);

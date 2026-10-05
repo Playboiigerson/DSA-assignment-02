@@ -116,7 +116,7 @@ function processPayment(OrderCreatedEvent event) returns error? {
     }
     
     // Save transaction
-    string txnId = "txn_" + check random:createDecimal().toString().substring(2, 10);
+    string txnId = "txn_" + random:createDecimal().toString().substring(2, 10);
     string timestamp = time:utcToString(time:utcNow());
     PaymentTransaction paymentTxn = {
         transactionId: txnId,
